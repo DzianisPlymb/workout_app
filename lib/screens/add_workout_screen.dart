@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/user.dart';
 import '../models/workout.dart';
+import '../models/exercise.dart';
 import '../db/database_helper.dart';
 
 class AddWorkoutScreen extends StatefulWidget {
@@ -27,15 +28,26 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
 
   bool _isSaving = false;
   String? _errorMessage;
+  List<Exercise> _exercises = [];
+  late int _workoutId;
 
   @override
   void initState() {
     super.initState();
     if (widget.workout != null) {
+      _workoutId = widget.workout!.id!;
       _titleController.text = widget.workout!.title;
       _descriptionController.text = widget.workout!.description;
       _durationController.text = widget.workout!.durationMinutes.toString();
+      _loadExercises();
+    } else {
+      _workoutId = -1; // placeholder
     }
+  }
+
+  Future<void> _loadExercises() async {
+    _exercises = await _dbHelper.getExercisesForWorkout(_workoutId);
+    setState(() {});
   }
 
   @override
@@ -72,6 +84,7 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
     });
 
     try {
+      int workoutId;
       if (widget.workout == null) {
         // Новая тренировка
         final newWorkout = Workout(
@@ -80,17 +93,28 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
           description: description,
           durationMinutes: duration,
         );
-        await _dbHelper.insertWorkout(newWorkout);
+        workoutId = await _dbHelper.insertWorkout(newWorkout);
+        // Сохранить упражнения с правильным workoutId
+        for (var exercise in _exercises) {
+          final updatedExercise = Exercise(
+            workoutId: workoutId,
+            name: exercise.name,
+            durationSeconds: exercise.durationSeconds,
+          );
+          await _dbHelper.insertExercise(updatedExercise);
+        }
       } else {
         // Обновление имеющейся
+        workoutId = widget.workout!.id!;
         final updatedWorkout = Workout(
-          id: widget.workout!.id,
+          id: workoutId,
           userId: widget.user.id!,
           title: title,
           description: description,
           durationMinutes: duration,
         );
         await _dbHelper.updateWorkout(updatedWorkout);
+        // Упражнения уже обновлены отдельно
       }
 
       if (!mounted) return;
@@ -104,6 +128,75 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
         _isSaving = false;
       });
     }
+  }
+
+  Future<void> _addOrEditExercise([Exercise? exercise]) async {
+    final nameController = TextEditingController(text: exercise?.name ?? '');
+    final durationController = TextEditingController(text: exercise?.durationSeconds.toString() ?? '');
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(exercise == null ? 'Добавить упражнение' : 'Редактировать упражнение'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: 'Название'),
+            ),
+            TextField(
+              controller: durationController,
+              decoration: const InputDecoration(labelText: 'Длительность (секунды)'),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      final name = nameController.text.trim();
+      final durationText = durationController.text.trim();
+      final duration = int.tryParse(durationText);
+
+      if (name.isNotEmpty && duration != null && duration > 0) {
+        if (exercise == null) {
+          // Новое упражнение
+          final newExercise = Exercise(
+            workoutId: _workoutId,
+            name: name,
+            durationSeconds: duration,
+          );
+          await _dbHelper.insertExercise(newExercise);
+        } else {
+          // Обновление
+          final updatedExercise = Exercise(
+            id: exercise.id,
+            workoutId: _workoutId,
+            name: name,
+            durationSeconds: duration,
+          );
+          await _dbHelper.updateExercise(updatedExercise);
+        }
+        _loadExercises();
+      }
+    }
+  }
+
+  Future<void> _deleteExercise(int id) async {
+    await _dbHelper.deleteExercise(id);
+    _loadExercises();
   }
 
   @override
@@ -139,6 +232,39 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
                 labelText: 'Длительность (минуты)',
               ),
               keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 16),
+            Text('Упражнения:', style: Theme.of(context).textTheme.titleMedium),
+            SizedBox(
+              height: 200,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _exercises.length,
+                itemBuilder: (context, index) {
+                  final exercise = _exercises[index];
+                  return ListTile(
+                    title: Text(exercise.name),
+                    subtitle: Text('${exercise.durationSeconds} сек'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _addOrEditExercise(exercise),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteExercise(exercise.id!),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => _addOrEditExercise(),
+              child: const Text('Добавить упражнение'),
             ),
             const SizedBox(height: 16),
             if (_errorMessage != null)

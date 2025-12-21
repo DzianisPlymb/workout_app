@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../models/user.dart';
 import '../models/workout.dart';
+import '../models/exercise.dart';
 import '../db/database_helper.dart';
 import 'add_workout_screen.dart';
 import 'login_screen.dart';
+import 'workout_execution_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final User user;
@@ -40,6 +42,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _deleteWorkout(int id) async {
     await _dbHelper.deleteWorkout(id);
     await _loadWorkouts();
+  }
+
+  Future<void> _startWorkout(Workout workout) async {
+    final exercises = await _dbHelper.getExercisesForWorkout(workout.id!);
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WorkoutExecutionScreen(
+          workout: workout,
+          exercises: exercises,
+        ),
+      ),
+    );
   }
 
   void _logout() {
@@ -93,9 +108,18 @@ class _HomeScreenState extends State<HomeScreen> {
                           'Длительность: ${w.durationMinutes} мин\n${w.description}'),
                       isThreeLine: true,
                       onTap: () => _openAddWorkout(w),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _deleteWorkout(w.id!),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.play_arrow, color: Colors.green),
+                            onPressed: () => _startWorkout(w),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteWorkout(w.id!),
+                          ),
+                        ],
                       ),
                     );
                   },

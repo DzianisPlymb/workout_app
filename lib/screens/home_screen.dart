@@ -74,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    // Если тренировку добавили/обновили — перезагрузим список
+    // Если тренировку добавили илиобновили — пперезагрузка списка
     if (result == true) {
       await _loadWorkouts();
     }
@@ -117,7 +117,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _deleteWorkout(w.id!),
+                            onPressed: () {
+                              final workoutId = w.id;
+                              if (workoutId != null) {
+                                _deleteWorkout(workoutId);
+                              }
+                            },
                           ),
                         ],
                       ),

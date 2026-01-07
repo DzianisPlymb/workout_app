@@ -25,7 +25,7 @@ class DatabaseHelper {
     // Открываем или создаём базу
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -60,6 +60,7 @@ class DatabaseHelper {
         workout_id INTEGER NOT NULL,
         name TEXT NOT NULL,
         duration_seconds INTEGER NOT NULL,
+        youtube_url TEXT,
         FOREIGN KEY (workout_id) REFERENCES workouts (id)
       )
     ''');
@@ -78,9 +79,13 @@ class DatabaseHelper {
         )
       ''');
     }
+    if (oldVersion < 3) {
+      await db.execute(
+          'ALTER TABLE exercises ADD COLUMN youtube_url TEXT');
+    }
   }
 
-  // ---------- Методы для пользователей ----------
+  //Методы для пользователей
 
   Future<int> registerUser(User user) async {
     final db = await database;
@@ -100,7 +105,7 @@ class DatabaseHelper {
     return null;
   }
 
-  // ---------- Методы для тренировок ----------
+  //  Методы для тренировок
 
   Future<int> insertWorkout(Workout workout) async {
     final db = await database;
@@ -130,6 +135,13 @@ class DatabaseHelper {
 
   Future<int> deleteWorkout(int id) async {
     final db = await database;
+  
+    await db.delete(
+      'exercises',
+      where: 'workout_id = ?',
+      whereArgs: [id],
+    );
+   
     return await db.delete(
       'workouts',
       where: 'id = ?',
@@ -137,7 +149,6 @@ class DatabaseHelper {
     );
   }
 
-  // ---------- Методы для упражнений ----------
 
   Future<int> insertExercise(Exercise exercise) async {
     final db = await database;

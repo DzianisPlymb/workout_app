@@ -3,20 +3,23 @@ class Exercise {
   int workoutId;
   String name;
   int durationSeconds; // Время на выполнение упражнения
-
-  Exercise({
-    this.id,
-    required this.workoutId,
-    required this.name,
-    required this.durationSeconds,
-  });
-
-  Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{
-      'workout_id': workoutId,
-      'name': name,
-      'duration_seconds': durationSeconds,
-    };
+  String? youtubeUrl;
+ 
+   Exercise({
+     this.id,
+     required this.workoutId,
+     required this.name,
+     required this.durationSeconds,
+     this.youtubeUrl,
+   });
+ 
+   Map<String, dynamic> toMap() {
+     final map = <String, dynamic>{
+       'workout_id': workoutId,
+       'name': name,
+       'duration_seconds': durationSeconds,
+       'youtube_url': youtubeUrl,
+     };
     if (id != null) {
       map['id'] = id;
     }
@@ -29,6 +32,7 @@ class Exercise {
       workoutId: map['workout_id'] as int,
       name: map['name'] as String,
       durationSeconds: map['duration_seconds'] as int,
+      youtubeUrl: map['youtube_url'] as String?,
     );
   }
 }

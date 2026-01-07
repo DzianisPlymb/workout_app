@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/user.dart';
 import '../models/workout.dart';
@@ -88,23 +92,40 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
       if (widget.workout == null) {
         // Новая тренировка
         final newWorkout = Workout(
-          userId: widget.user.id!,
+          userId: widget.user.id ?? (throw Exception('User ID is null')),
           title: title,
           description: description,
           durationMinutes: duration,
         );
         workoutId = await _dbHelper.insertWorkout(newWorkout);
-        // Сохранить упражнения с правильным workoutId
-        for (var exercise in _exercises) {
-          final updatedExercise = Exercise(
+        // // Сохранить упражнения с правильным workoutId
+        // for (var exercise in _exercises) {
+        //   final updatedExercise = Exercise(
+        //     workoutId: workoutId,
+        //     name: exercise.name,
+        //     durationSeconds: exercise.durationSeconds,
+        //   );
+        //   await _dbHelper.insertExercise(updatedExercise);
+        // }
+        
+        // Обновление ID тренировки для всех добавленных упражнений и сохранение их
+        for (var i = 0; i < _exercises.length; i++) {
+          _exercises[i] = Exercise(
+            id: _exercises[i].id,
             workoutId: workoutId,
-            name: exercise.name,
-            durationSeconds: exercise.durationSeconds,
+            name: _exercises[i].name,
+            durationSeconds: _exercises[i].durationSeconds,
+            youtubeUrl: _exercises[i].youtubeUrl,
           );
-          await _dbHelper.insertExercise(updatedExercise);
+          // Если у упражнения уже есть IDто обновление иначе вставляем
+          if (_exercises[i].id != null) {
+              await _dbHelper.updateExercise(_exercises[i]);
+          } else {
+              await _dbHelper.insertExercise(_exercises[i]);
+          }
         }
       } else {
-        // Обновление имеющейся
+        // Обновление существующей тренировки
         workoutId = widget.workout!.id!;
         final updatedWorkout = Workout(
           id: workoutId,
@@ -114,7 +135,7 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
           durationMinutes: duration,
         );
         await _dbHelper.updateWorkout(updatedWorkout);
-        // Упражнения уже обновлены отдельно
+
       }
 
       if (!mounted) return;
@@ -131,66 +152,170 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
   }
 
   Future<void> _addOrEditExercise([Exercise? exercise]) async {
-    final nameController = TextEditingController(text: exercise?.name ?? '');
-    final durationController = TextEditingController(text: exercise?.durationSeconds.toString() ?? '');
 
-    final result = await showDialog<bool>(
+    const String apiKey = String.fromEnvironment('YOUTUBE_API_KEY', defaultValue: '');
+    final nameController = TextEditingController(text: exercise?.name ?? '');
+    final durationController =
+        TextEditingController(text: exercise?.durationSeconds.toString() ?? '');
+    String? youtubeUrl = exercise?.youtubeUrl;
+
+    Timer? searchTimer;
+    String? youtubeThumbnailUrl;
+    bool isSearching = false;
+
+    void searchYouTube(String query, StateSetter setState) {
+      if (apiKey.isEmpty) {
+        print('YouTube API key is not set. Skipping search.');
+        return;
+      }
+      if (query.length < 3) {
+        return;
+      }
+
+      setState(() {
+        isSearching = true;
+        youtubeThumbnailUrl = null;
+        youtubeUrl = null;
+      });
+
+      http
+          .get(
+        Uri.parse(
+            'https://www.googleapis.com/youtube/v3/search?part=snippet&q=$query exercise&type=video&maxResults=1&key=$apiKey'),
+      )
+          .then((response) {
+        // отладка
+        print('YouTube API Response Status: ${response.statusCode}');
+        print('YouTube API Response Body: ${response.body}');
+        // конец отладки
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['items'] != null && data['items'].isNotEmpty) {
+            final videoId = data['items'][0]['id']['videoId'];
+            setState(() {
+              youtubeUrl = 'https://www.youtube.com/watch?v=$videoId';
+              youtubeThumbnailUrl =
+                  data['items'][0]['snippet']['thumbnails']['high']['url'];
+            });
+          } else {
+             print('YouTube API: No items found in response.');
+          }
+        } else {
+          print('YouTube API Error: Failed to load video.');
+        }
+      }).whenComplete(() {
+        setState(() {
+          isSearching = false;
+        });
+      });
+    }
+
+    nameController.addListener(() {
+      if (searchTimer?.isActive ?? false) searchTimer!.cancel();
+      searchTimer = Timer(const Duration(seconds: 1), () {
+
+      });
+    });
+
+    final result = await showDialog<Exercise?>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(exercise == null ? 'Добавить упражнение' : 'Редактировать упражнение'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: 'Название'),
-            ),
-            TextField(
-              controller: durationController,
-              decoration: const InputDecoration(labelText: 'Длительность (секунды)'),
-              keyboardType: TextInputType.number,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Отмена'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Сохранить'),
-          ),
-        ],
-      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+
+            nameController.addListener(() {
+              if (searchTimer?.isActive ?? false) searchTimer!.cancel();
+              searchTimer = Timer(const Duration(seconds: 1), () {
+                searchYouTube(nameController.text, setState);
+              });
+            });
+
+            return AlertDialog(
+              title: Text(exercise == null
+                  ? 'Добавить упражнение'
+                  : 'Редактировать упражнение'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(labelText: 'Название'),
+                    ),
+                    TextField(
+                      controller: durationController,
+                      decoration: const InputDecoration(
+                          labelText: 'Длительность (секунды)'),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 16),
+                    if (isSearching)
+                      const CircularProgressIndicator()
+                    else if (youtubeThumbnailUrl != null)
+                      InkWell(
+                        onTap: () async {
+                          if (youtubeUrl != null) {
+                            final uri = Uri.parse(youtubeUrl!);
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                            }
+                          }
+                        },
+                        child: Column(
+                          children: [
+                            Image.network(youtubeThumbnailUrl!),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Нажмите, чтобы открыть видео',
+                              style: TextStyle(color: Colors.blue, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      )
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(null),
+                  child: const Text('Отмена'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    final name = nameController.text.trim();
+                    final durationText = durationController.text.trim();
+                    final duration = int.tryParse(durationText);
+
+                    if (name.isNotEmpty && duration != null && duration > 0) {
+                      final ex = Exercise(
+                        id: exercise?.id,
+                        workoutId: _workoutId,
+                        name: name,
+                        durationSeconds: duration,
+                        youtubeUrl: youtubeUrl,
+                      );
+                      Navigator.of(context).pop(ex);
+                    }
+                  },
+                  child: const Text('Сохранить'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
 
-    if (result == true) {
-      final name = nameController.text.trim();
-      final durationText = durationController.text.trim();
-      final duration = int.tryParse(durationText);
-
-      if (name.isNotEmpty && duration != null && duration > 0) {
-        if (exercise == null) {
-          // Новое упражнение
-          final newExercise = Exercise(
-            workoutId: _workoutId,
-            name: name,
-            durationSeconds: duration,
-          );
-          await _dbHelper.insertExercise(newExercise);
-        } else {
-          // Обновление
-          final updatedExercise = Exercise(
-            id: exercise.id,
-            workoutId: _workoutId,
-            name: name,
-            durationSeconds: duration,
-          );
-          await _dbHelper.updateExercise(updatedExercise);
-        }
-        _loadExercises();
+    if (result != null) {
+      if (result.id == null) {
+        // Новое
+        await _dbHelper.insertExercise(result);
+      } else {
+        // Обновление
+        await _dbHelper.updateExercise(result);
       }
+      _loadExercises();
     }
   }
 
@@ -243,6 +368,9 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
                 itemBuilder: (context, index) {
                   final exercise = _exercises[index];
                   return ListTile(
+                    leading: (exercise.youtubeUrl != null && exercise.youtubeUrl!.isNotEmpty)
+                        ? const Icon(Icons.smart_display, color: Colors.red)
+                        : const Icon(Icons.smart_display, color: Colors.grey),
                     title: Text(exercise.name),
                     subtitle: Text('${exercise.durationSeconds} сек'),
                     trailing: Row(
@@ -254,7 +382,12 @@ class _AddWorkoutScreenState extends State<AddWorkoutScreen> {
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteExercise(exercise.id!),
+                          onPressed: () {
+                            final exerciseId = exercise.id;
+                            if (exerciseId != null) {
+                              _deleteExercise(exerciseId);
+                            }
+                          },
                         ),
                       ],
                     ),
